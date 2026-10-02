@@ -7,16 +7,32 @@ Resonix turns your phone's gyroscope or your computer mouse into an expressive m
 [![Play Demo](https://img.shields.io/badge/Live%20Demo-Play%20Now-brightgreen?style=for-the-badge&logo=googlechrome&logoColor=white)](https://simone2048.github.io/Resonix/)
 [![GitHub Repo](https://img.shields.io/badge/Source-GitHub-blue?style=for-the-badge&logo=github)](https://github.com/Simone2048/Resonix)
 
-## Demo
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="Screenshots/1.png" alt="Resonix Desktop Mode (Horizontal)" height="340" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="Screenshots/2.png" alt="Resonix Mobile Gyroscope Mode (Vertical)" height="340" />
+</p>
+<p align="center">
+  <em>Desktop Interface (Left) &nbsp;|&nbsp; Mobile Performance Mode (Right)</em>
+</p>
+
+---
+
+## Demo Video
 
 <p align="center">
   <a href="Screenshots/demo_1.mp4">
-    <img src="Screenshots/1.png" alt="Watch Demo Video" width="80%" />
+    <img src="Screenshots/1.png" alt="Watch Resonix Demo Video" width="80%" />
   </a>
   <br>
-  <em><strong>Click the image above to watch the video demo</strong></em>
+  <sub>▶️ <strong>Click the image above to watch the video demo (demo_1.mp4)</strong></sub>
 </p>
 
+---
 ## How to Play
 
 You don't need music theory or years of violin training to get started. Just open the link, move around, and listen.
