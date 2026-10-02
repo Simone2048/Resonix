@@ -3,116 +3,85 @@ import sounddevice as sd
 import keyboard
 import time
 
-class AudioPlayer:
-    def __init__(self, sample_rate=44100):
-        self.sample_rate = sample_rate
-        self.wave_type = "synth"  # Default waveform
+SAMPLE_RATE = 44100
+DURATION = 0.35  # Length of note
 
-    def generate_wave(self, frequency, t):
-        """Generates different synth waveforms using math."""
-        if self.wave_type == "sine":
-            # Smooth, pure tone
-            return np.sin(2 * np.pi * frequency * t)
-
-        elif self.wave_type == "sawtooth":
-            # Sharp, bright synth lead
-            return 2 * (t * frequency - np.floor(0.5 + t * frequency))
-
-        elif self.wave_type == "square":
-            # 8-bit retro arcade / chiptune sound
-            return np.sign(np.sin(2 * np.pi * frequency * t))
-
-        elif self.wave_type == "synth":
-            # DUAL OSCILLATORS: 2 sawtooth waves slightly detuned for a rich analog sound
-            osc1 = 2 * (t * frequency - np.floor(0.5 + t * frequency))
-            osc2 = 2 * (t * (frequency * 1.005) - np.floor(0.5 + t * (frequency * 1.005)))
-            return (osc1 + osc2) * 0.5
-
-        return np.sin(2 * np.pi * frequency * t)
-
-    def play_tone(self, frequency, duration=0.25):
-        t = np.linspace(0, duration, int(self.sample_rate * duration), False)
-        
-        # 1. Generate Wave
-        raw_wave = self.generate_wave(frequency, t)
-
-        # 2. Smooth exponential decay envelope (stops clicking/popping noises)
-        decay = np.exp(-3 * t / duration)
-        audio = (raw_wave * decay * 0.25).astype(np.float32)
-
-        # 3. Play sound (non-blocking so it feels fast)
-        sd.play(audio, self.sample_rate)
-
-    def get_frequency_from_note(self, note):
-        note_frequencies = {
-            'C4': 261.63,
-            'D4': 293.66,
-            'E4': 329.63,
-            'F4': 349.23,
-            'G4': 392.00,
-            'A4': 440.00,
-            'B4': 493.88,
-            'C5': 523.25
+class FastSynth:
+    def __init__(self):
+        self.wave_type = "synth"
+        self.frequencies = {
+            'a': ('C4', 261.63),
+            's': ('D4', 293.66),
+            'd': ('E4', 329.63),
+            'f': ('F4', 349.23),
+            'g': ('G4', 392.00),
+            'h': ('A4', 440.00),
+            'j': ('B4', 493.88),
+            'k': ('C5', 523.25)
         }
-        return note_frequencies.get(note, None)
+        # Pre-generate all sounds into memory for zero lag
+        self.sound_cache = {}
+        self.rebuild_cache()
 
-    def play_note(self, note):
-        frequency = self.get_frequency_from_note(note)
-        if frequency:
-            self.play_tone(frequency)
+    def generate_raw_wave(self, freq, t):
+        if self.wave_type == "sine":
+            return np.sin(2 * np.pi * freq * t)
+        elif self.wave_type == "sawtooth":
+            return 2 * (t * freq - np.floor(0.5 + t * freq))
+        elif self.wave_type == "square":
+            return np.sign(np.sin(2 * np.pi * freq * t))
+        elif self.wave_type == "synth":
+            # Dual fat analog oscillators
+            osc1 = 2 * (t * freq - np.floor(0.5 + t * freq))
+            osc2 = 2 * (t * (freq * 1.006) - np.floor(0.5 + t * (freq * 1.006)))
+            return (osc1 + osc2) * 0.5
+        return np.sin(2 * np.pi * freq * t)
 
-# ----------------- MAIN PROGRAM -----------------
+    def rebuild_cache(self):
+        """Bakes all waveforms in RAM in advance so playback is instant."""
+        t = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), False)
+        # Fast ADSR envelope: quick 5ms attack, smooth exponential decay
+        decay = np.exp(-3.5 * t / DURATION)
+        
+        for key, (name, freq) in self.frequencies.items():
+            wave = self.generate_raw_wave(freq, t)
+            # Store ready-to-play 32-bit float audio buffer
+            audio = (wave * decay * 0.25).astype(np.float32)
+            self.sound_cache[key] = (name, audio)
 
-player = AudioPlayer()
+    def trigger(self, key):
+        """Called INSTANTLY when a key is hit (no delay)."""
+        if key in self.sound_cache:
+            name, audio = self.sound_cache[key]
+            # Play immediately without waiting
+            sd.play(audio, SAMPLE_RATE)
+            print(f"[*] {name} ({self.wave_type.upper()})")
 
-# Map keyboard keys to musical notes
-key_to_note = {
-    'a': 'C4',
-    's': 'D4',
-    'd': 'E4',
-    'f': 'F4',
-    'g': 'G4',
-    'h': 'A4',
-    'j': 'B4',
-    'k': 'C5'
-}
+    def change_wave(self, new_type):
+        self.wave_type = new_type
+        self.rebuild_cache()
+        print(f"\n>> Sound Mode: {new_type.upper()}\n")
+
+# ----------------- INITIALIZE -----------------
+synth = FastSynth()
 
 print("=============================================")
-print("          RESONIX - PC SYNTHESIZER           ")
+print("       RESONIX - ZERO-LATENCY SYNTH          ")
 print("=============================================")
-print("PLAY NOTES:   [A] [S] [D] [F] [G] [H] [J] [K]")
-print("CHANGE SOUND: [1] Sine | [2] Sawtooth | [3] Square | [4] Dual Synth")
+print("PLAY KEYS:    [A] [S] [D] [F] [G] [H] [J] [K]")
+print("SOUND MODES:  [1] Sine | [2] Sawtooth | [3] Square | [4] Synth")
 print("EXIT:         Press [ESC]")
 print("=============================================\n")
 
-while True:
-    # 1. Listen for Note Keys
-    for key, note in key_to_note.items():
-        if keyboard.is_pressed(key):
-            # Using plain ASCII "[*]" instead of unicode music notes
-            print(f"[*] Key [{key.upper()}] -> Note {note} ({player.wave_type.upper()})")
-            player.play_note(note)
-            time.sleep(0.12)  # Avoid duplicate triggers from holding down a key
+# Set up instant event-driven hardware listeners (no sleeping loops!)
+for key in ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k']:
+    keyboard.on_press_key(key, lambda e, k=key: synth.trigger(k))
 
-    # 2. Listen for Waveform Switchers
-    if keyboard.is_pressed('1'):
-        player.wave_type = "sine"
-        print(">> Sound changed to: SINE (Smooth)")
-        time.sleep(0.2)
-    elif keyboard.is_pressed('2'):
-        player.wave_type = "sawtooth"
-        print(">> Sound changed to: SAWTOOTH (Bright)")
-        time.sleep(0.2)
-    elif keyboard.is_pressed('3'):
-        player.wave_type = "square"
-        print(">> Sound changed to: SQUARE (8-Bit Retro)")
-        time.sleep(0.2)
-    elif keyboard.is_pressed('4'):
-        player.wave_type = "synth"
-        print(">> Sound changed to: DUAL SYNTH (Analog)")
-        time.sleep(0.2)
+keyboard.on_press_key('1', lambda e: synth.change_wave("sine"))
+keyboard.on_press_key('2', lambda e: synth.change_wave("sawtooth"))
+keyboard.on_press_key('3', lambda e: synth.change_wave("square"))
+keyboard.on_press_key('4', lambda e: synth.change_wave("synth"))
 
-    # 3. Exit condition
-    if keyboard.is_pressed('esc'):
-        print("\nExiting Resonix. Goodbye!")
-        break
+# Keep program alive waiting for ESC
+keyboard.wait('esc')
+print("\nExiting. Goodbye!")
