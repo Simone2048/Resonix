@@ -3,23 +3,20 @@ import numpy as np
 import sys
 import time
 
-# Low-latency Audio Initialization
 pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 pygame.mixer.set_num_channels(32)
 
-WIDTH, HEIGHT = 900, 520
+WIDTH, HEIGHT = 1000, 560
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Resonix — Studio DAW & Piano Roll Editor")
+pygame.display.set_caption("Resonix — Multi-Timbre Freeform Studio DAW")
 
 font = pygame.font.SysFont('Arial', 13, bold=True)
-title_font = pygame.font.SysFont('Arial', 22, bold=True)
+title_font = pygame.font.SysFont('Arial', 20, bold=True)
 small_font = pygame.font.SysFont('Arial', 11)
 
 SAMPLE_RATE = 44100
-DURATION = 0.35
 
-# Ordered note pitch row list (From high pitch C5 down to C4)
 PITCHES = [
     ("C5", 523.25, False),
     ("B4", 493.88, False),
@@ -36,28 +33,23 @@ PITCHES = [
     ("C4", 261.63, False)
 ]
 
-# Physical Keyboard mapping to notes for live performance
-LIVE_KEYS = {
-    pygame.K_a: "C4",
-    pygame.K_w: "C#4",
-    pygame.K_s: "D4",
-    pygame.K_e: "D#4",
-    pygame.K_d: "E4",
-    pygame.K_f: "F4",
-    pygame.K_t: "F#4",
-    pygame.K_g: "G4",
-    pygame.K_y: "G#4",
-    pygame.K_h: "A4",
-    pygame.K_u: "A#4",
-    pygame.K_j: "B4",
-    pygame.K_k: "C5"
+# 6 Studio Timbres
+TIMBRES = {
+    1: {"name": "Fat Synth", "type": "synth", "color": (0, 242, 254), "enabled": True},
+    2: {"name": "8-Bit Square", "type": "square", "color": (255, 0, 127), "enabled": True},
+    3: {"name": "Bright Saw", "type": "sawtooth", "color": (255, 170, 0), "enabled": False},
+    4: {"name": "Soft Sine", "type": "sine", "color": (50, 255, 150), "enabled": False},
+    5: {"name": "Sub Bass", "type": "bass", "color": (160, 50, 255), "enabled": True},
+    6: {"name": "Pluck Bell", "type": "pluck", "color": (255, 230, 80), "enabled": False}
 }
 
-CURRENT_WAVE = "synth"
+active_timbre_view = 1
 
-def build_sound(freq, wave_type):
-    n_samples = int(SAMPLE_RATE * DURATION)
-    t = np.linspace(0, DURATION, n_samples, False)
+def synthesize_audio(freq, duration, wave_type):
+    """Dynamic note synthesis with sustain for custom lengths."""
+    duration = max(0.08, duration)
+    n_samples = int(SAMPLE_RATE * duration)
+    t = np.linspace(0, duration, n_samples, False)
 
     if wave_type == "sine":
         wave = np.sin(2 * np.pi * freq * t)
@@ -69,72 +61,81 @@ def build_sound(freq, wave_type):
         w1 = 2 * (t * freq - np.floor(0.5 + t * freq))
         w2 = 2 * (t * (freq * 1.006) - np.floor(0.5 + t * (freq * 1.006)))
         wave = (w1 + w2) * 0.5
+    elif wave_type == "bass":
+        wave = np.sin(2 * np.pi * (freq * 0.5) * t) + 0.3 * np.sign(np.sin(2 * np.pi * (freq * 0.5) * t))
+    elif wave_type == "pluck":
+        wave = np.sin(2 * np.pi * freq * t) * np.exp(-12 * t / duration)
 
-    envelope = np.exp(-4.0 * t / DURATION)
-    audio = wave * envelope * 0.35
-    audio_16bit = (audio * 32767).astype(np.int16)
-    stereo = np.column_stack((audio_16bit, audio_16bit))
+    # Dynamic envelope with soft attack and decay at the end of the custom duration
+    env = np.ones_like(t)
+    attack = int(SAMPLE_RATE * 0.015)
+    release = int(SAMPLE_RATE * 0.03)
+
+    if len(t) > attack + release:
+        env[:attack] = np.linspace(0, 1, attack)
+        env[-release:] = np.linspace(1, 0, release)
+    else:
+        env = np.linspace(1, 0, len(t))
+
+    audio = (wave * env * 0.35 * 32767).astype(np.int16)
+    stereo = np.column_stack((audio, audio))
     return pygame.sndarray.make_sound(stereo)
 
-SOUND_BANK = {}
-def reload_sounds():
-    global SOUND_BANK
-    for name, freq, _ in PITCHES:
-        SOUND_BANK[name] = build_sound(freq, CURRENT_WAVE)
+# ----------------- TIMELINE & SPARTITO DATA -----------------
+# Each Timbre has its own list of freeform notes: [ {row, x, width, note_name, freq} ]
+TRACK_NOTES = {i: [] for i in range(1, 7)}
 
-reload_sounds()
+# Starter notes for Timbre 1
+TRACK_NOTES[1].append({"row": 12, "x": 100, "w": 80, "name": "C4", "freq": 261.63})
+TRACK_NOTES[1].append({"row": 8,  "x": 220, "w": 120, "name": "E4", "freq": 329.63})
+TRACK_NOTES[1].append({"row": 5,  "x": 380, "w": 90, "name": "G4", "freq": 392.00})
+TRACK_NOTES[1].append({"row": 0,  "x": 510, "w": 180, "name": "C5", "freq": 523.25})
 
-# ----------------- DAW GRID & SEQUENCER ENGINE -----------------
-STEPS = 8
+# Starter bass line for Timbre 5
+TRACK_NOTES[5].append({"row": 12, "x": 100, "w": 200, "name": "C4", "freq": 261.63})
+TRACK_NOTES[5].append({"row": 7,  "x": 380, "w": 250, "name": "F4", "freq": 349.23})
+
+# Geometry constants
+CANVAS_X = 85
+CANVAS_Y = 85
+CANVAS_WIDTH = 880
+CELL_HEIGHT = 28
 NUM_ROWS = len(PITCHES)
 
-# 5 DAW Pattern Banks (Slots 5, 6, 7, 8, 9)
-# Each pattern is a 13 rows x 8 columns matrix of booleans
-PATTERNS = {
-    slot: [[False for _ in range(STEPS)] for _ in range(NUM_ROWS)]
-    for slot in range(5, 10)
-}
-
-# Pre-fill pattern 5 with a nice starter melody
-PATTERNS[5][12][0] = True # C4
-PATTERNS[5][10][1] = True # D4
-PATTERNS[5][8][2] = True  # E4
-PATTERNS[5][7][3] = True  # F4
-PATTERNS[5][5][4] = True  # G4
-PATTERNS[5][3][5] = True  # A4
-PATTERNS[5][1][6] = True  # B4
-PATTERNS[5][0][7] = True  # C5
-
-current_pattern_slot = 5
+# Playback engine
 is_playing = True
-current_step = 0
-last_step_time = time.time()
-STEP_DURATION = 0.18  # Tempo / Speed (130 BPM feel)
+playhead_x = CANVAS_X
+PLAYHEAD_SPEED = 240  # Pixels per second
 
-# Layout constants for the piano roll grid
-GRID_X = 85
-GRID_Y = 80
-CELL_WIDTH = 95
-CELL_HEIGHT = 26
+# Editing state
+creating_note = None
+resizing_note = None
+drag_start_x = 0
 
 clock = pygame.time.Clock()
-active_live_keys = set()
+last_time = time.time()
 
 # ----------------- MAIN LOOP -----------------
 while True:
+    dt = clock.tick(60) / 1000.0  # Delta time in seconds
     now = time.time()
 
-    # Step Sequencer Clock
-    if is_playing and (now - last_step_time >= STEP_DURATION):
-        current_step = (current_step + 1) % STEPS
-        last_step_time = now
+    # Smooth Laser Playhead Movement
+    if is_playing:
+        prev_x = playhead_x
+        playhead_x += PLAYHEAD_SPEED * dt
+        if playhead_x >= CANVAS_X + CANVAS_WIDTH:
+            playhead_x = CANVAS_X
 
-        # Trigger notes active on this step column
-        grid = PATTERNS[current_pattern_slot]
-        for row_idx in range(NUM_ROWS):
-            if grid[row_idx][current_step]:
-                note_name = PITCHES[row_idx][0]
-                SOUND_BANK[note_name].play()
+        # Trigger notes for all ENABLED timbres
+        for t_idx, t_data in TIMBRES.items():
+            if t_data["enabled"]:
+                for note in TRACK_NOTES[t_idx]:
+                    # Check if playhead just passed note start position
+                    if prev_x <= note["x"] < playhead_x or (prev_x > playhead_x and note["x"] <= playhead_x):
+                        dur = note["w"] / PLAYHEAD_SPEED
+                        snd = synthesize_audio(note["freq"], dur, t_data["type"])
+                        snd.play()
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -143,129 +144,99 @@ while True:
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mx, my = event.pos
-            # Check if clicked inside the Piano Roll Grid
-            if GRID_X <= mx < GRID_X + (STEPS * CELL_WIDTH) and GRID_Y <= my < GRID_Y + (NUM_ROWS * CELL_HEIGHT):
-                col = int((mx - GRID_X) // CELL_WIDTH)
-                row = int((my - GRID_Y) // CELL_HEIGHT)
 
-                # Toggle note block on/off
-                grid = PATTERNS[current_pattern_slot]
-                grid[row][col] = not grid[row][col]
+            # 1. Clicked Top Timbre Selector / Checkbox
+            if 20 <= my <= 58:
+                for idx in range(1, 7):
+                    bx = 200 + (idx - 1) * 125
+                    if bx <= mx <= bx + 115:
+                        # Left click = Select timbre to view/edit
+                        if event.button == 1:
+                            if mx >= bx + 85: # Clicked enable checkbox
+                                TIMBRES[idx]["enabled"] = not TIMBRES[idx]["enabled"]
+                            else:
+                                active_timbre_view = idx
+                        # Right click = Toggle enable
+                        elif event.button == 3:
+                            TIMBRES[idx]["enabled"] = not TIMBRES[idx]["enabled"]
 
-                # Preview sound if turned on
-                if grid[row][col]:
-                    note_name = PITCHES[row][0]
-                    SOUND_BANK[note_name].play()
+            # 2. Clicked in the Spartito Canvas
+            elif CANVAS_X <= mx <= CANVAS_X + CANVAS_WIDTH and CANVAS_Y <= my <= CANVAS_Y + (NUM_ROWS * CELL_HEIGHT):
+                row = int((my - CANVAS_Y) // CELL_HEIGHT)
+                curr_notes = TRACK_NOTES[active_timbre_view]
+
+                # Right Click = Erase Note
+                if event.button == 3:
+                    for n in curr_notes[:]:
+                        ry = CANVAS_Y + (n["row"] * CELL_HEIGHT)
+                        if n["x"] <= mx <= n["x"] + n["w"] and ry <= my <= ry + CELL_HEIGHT:
+                            curr_notes.remove(n)
+                            break
+
+                # Left Click = Resize edge OR Place new fluid note
+                elif event.button == 1:
+                    # Check if clicking on the right edge of an existing note to resize
+                    hit_resize = False
+                    for n in curr_notes:
+                        ry = CANVAS_Y + (n["row"] * CELL_HEIGHT)
+                        if ry <= my <= ry + CELL_HEIGHT and abs(mx - (n["x"] + n["w"])) <= 10:
+                            resizing_note = n
+                            hit_resize = True
+                            break
+
+                    if not hit_resize:
+                        # Create new note and prepare to drag its width
+                        note_info = PITCHES[row]
+                        new_n = {"row": row, "x": mx, "w": 10, "name": note_info[0], "freq": note_info[1]}
+                        curr_notes.append(new_n)
+                        creating_note = new_n
+                        drag_start_x = mx
+                        # Play preview
+                        snd = synthesize_audio(note_info[1], 0.3, TIMBRES[active_timbre_view]["type"])
+                        snd.play()
+
+        elif event.type == pygame.MOUSEMOTION:
+            mx, my = event.pos
+            if creating_note:
+                creating_note["w"] = max(15, mx - creating_note["x"])
+            elif resizing_note:
+                resizing_note["w"] = max(15, mx - resizing_note["x"])
+
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                creating_note = None
+                resizing_note = None
 
         elif event.type == pygame.KEYDOWN:
-            # Play live note
-            if event.key in LIVE_KEYS:
-                note_name = LIVE_KEYS[event.key]
-                SOUND_BANK[note_name].play()
-                active_live_keys.add(note_name)
-
-            # Spacebar = Play / Pause Sequencer
-            elif event.key == pygame.K_SPACE:
+            if event.key == pygame.K_SPACE:
                 is_playing = not is_playing
 
-            # Change Pattern [5, 6, 7, 8, 9]
-            elif event.key in [pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9]:
-                current_pattern_slot = int(event.unicode)
-
-            # Change Waveform [1, 2, 3, 4]
-            elif event.key == pygame.K_1:
-                CURRENT_WAVE = "sine"
-                reload_sounds()
-            elif event.key == pygame.K_2:
-                CURRENT_WAVE = "sawtooth"
-                reload_sounds()
-            elif event.key == pygame.K_3:
-                CURRENT_WAVE = "square"
-                reload_sounds()
-            elif event.key == pygame.K_4:
-                CURRENT_WAVE = "synth"
-                reload_sounds()
+            # Quick Timbre View switch [1-6]
+            elif event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]:
+                active_timbre_view = int(event.unicode)
 
             elif event.key == pygame.K_ESCAPE:
                 pygame.quit()
                 sys.exit()
 
-        elif event.type == pygame.KEYUP:
-            if event.key in LIVE_KEYS:
-                note_name = LIVE_KEYS[event.key]
-                if note_name in active_live_keys:
-                    active_live_keys.remove(note_name)
+    # ----------------- DRAW UI -----------------
+    screen.fill((14, 16, 22))
 
-    # ----------------- RENDER STUDIO INTERFACE -----------------
-    screen.fill((16, 18, 24))  # Dark studio background
-
-    # 1. Header Toolbar
+    # Top Toolbar
     title = title_font.render("RESONIX STUDIO", True, (0, 242, 254))
-    wave_badge = font.render(f"SYNTH: {CURRENT_WAVE.upper()} [1-4]", True, (255, 0, 127))
     play_state = font.render("[SPACE] RUNNING" if is_playing else "[SPACE] PAUSED", True, (0, 255, 130) if is_playing else (255, 180, 0))
-    screen.blit(title, (25, 18))
-    screen.blit(play_state, (230, 24))
-    screen.blit(wave_badge, (380, 24))
+    screen.blit(title, (20, 18))
+    screen.blit(play_state, (20, 42))
 
-    # Pattern Slots Badges [5-9]
-    for i, slot in enumerate(range(5, 10)):
-        is_sel = (slot == current_pattern_slot)
-        bg_col = (0, 242, 254) if is_sel else (30, 34, 45)
-        txt_col = (0, 0, 0) if is_sel else (180, 185, 200)
-        bx = 620 + (i * 52)
-        pygame.draw.rect(screen, bg_col, (bx, 18, 46, 28), border_radius=4)
-        lbl = font.render(f"P{slot}", True, txt_col)
-        screen.blit(lbl, (bx + 12, 24))
+    # 6 Timbre Tabs with Checkboxes [1 - 6]
+    for idx in range(1, 7):
+        t_data = TIMBRES[idx]
+        bx = 200 + (idx - 1) * 125
+        is_selected = (idx == active_timbre_view)
 
-    # 2. Draw Piano Roll Grid
-    grid = PATTERNS[current_pattern_slot]
+        bg_color = (35, 40, 55) if not is_selected else (50, 58, 80)
+        border_col = t_data["color"] if is_selected else (55, 60, 75)
 
-    for row_idx, (note_name, _, is_sharp) in enumerate(PITCHES):
-        ry = GRID_Y + (row_idx * CELL_HEIGHT)
-
-        # Left Pitch Key Piano Label
-        key_color = (35, 38, 48) if is_sharp else (225, 225, 235)
-        text_color = (200, 200, 210) if is_sharp else (20, 20, 20)
-
-        # Light up key if currently being played by sequencer or live keyboard
-        if (is_playing and grid[row_idx][current_step]) or (note_name in active_live_keys):
-            key_color = (0, 242, 254)
-            text_color = (0, 0, 0)
-
-        pygame.draw.rect(screen, key_color, (20, ry, 60, CELL_HEIGHT - 2), border_radius=3)
-        nlbl = small_font.render(note_name, True, text_color)
-        screen.blit(nlbl, (32, ry + 6))
-
-        # Grid Columns (8 Steps)
-        for col_idx in range(STEPS):
-            cx = GRID_X + (col_idx * CELL_WIDTH)
-            is_active = grid[row_idx][col_idx]
-
-            # DAW Block Styling
-            if is_active:
-                block_color = (255, 0, 127) if is_sharp else (0, 242, 254) # Neon Pink / Cyan blocks
-            else:
-                # Alternating beat background
-                block_color = (24, 27, 36) if (col_idx // 4) % 2 == 0 else (20, 23, 31)
-
-            pygame.draw.rect(screen, block_color, (cx, ry, CELL_WIDTH - 2, CELL_HEIGHT - 2), border_radius=3)
-
-    # 3. Playhead (Vertical sweeping laser line)
-    if is_playing:
-        playhead_x = GRID_X + (current_step * CELL_WIDTH)
-        s = pygame.Surface((CELL_WIDTH - 2, NUM_ROWS * CELL_HEIGHT), pygame.SRCALPHA)
-        s.fill((255, 255, 255, 45))  # White translucent highlight over current beat
-        screen.blit(s, (playhead_x, GRID_Y))
-        pygame.draw.line(screen, (255, 255, 255), (playhead_x, GRID_Y), (playhead_x, GRID_Y + NUM_ROWS * CELL_HEIGHT), 2)
-
-    # 4. Status and Control Footer
-    footer = [
-        "MOUSE: Click any block to paint/erase notes",
-        "KEYBOARD: Play live [A-K] | PATTERNS: [5-9] | SOUND: [1-4] | TRANSPORT: [SPACE] Pause/Play"
-    ]
-    for i, t in enumerate(footer):
-        info = small_font.render(t, True, (130, 135, 150))
-        screen.blit(info, (25, 445 + (i * 18)))
-
-    pygame.display.flip()
-    clock.tick(60)
+        # Tab card
+        pygame.draw.rect(screen, bg_color, (bx, 15, 118, 42), border_radius=6)
+        pygame.dr
