@@ -5,14 +5,16 @@ import sys
 # 1. Initialize Pygame Audio Mixer with ultra-low buffer (512 = ~11ms latency)
 pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
-pygame.mixer.set_num_channels(16)  # Allows up to 16 notes to play at once!
+pygame.mixer.set_num_channels(16)  # Allows multiple notes to play at once (chords!)
 
 # Window setup
-WIDTH, HEIGHT = 700, 350
+WIDTH, HEIGHT = 700, 360
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Resonix — Polyphonic Hardware Synth")
-font = pygame.font.SysEvent('Arial', 18)
-title_font = pygame.font.SysEvent('Arial', 28, bold=True)
+
+# Fonts (Fixed typo: SysFont)
+font = pygame.font.SysFont('Arial', 16, bold=True)
+title_font = pygame.font.SysFont('Arial', 26, bold=True)
 
 # Audio Settings
 SAMPLE_RATE = 44100
@@ -35,7 +37,7 @@ NOTES = {
     pygame.K_k: ("C5", 523.25)
 }
 
-CURRENT_WAVE = "synth"  # Default mode
+CURRENT_WAVE = "synth"  # Default waveform
 
 def build_sound(freq, wave_type):
     """Generates 16-bit stereo PCM audio buffer for Pygame."""
@@ -54,7 +56,7 @@ def build_sound(freq, wave_type):
         w2 = 2 * (t * (freq * 1.006) - np.floor(0.5 + t * (freq * 1.006)))
         wave = (w1 + w2) * 0.5
 
-    # Envelope: Quick attack + smooth exponential decay (no clicking)
+    # Envelope: Quick attack + smooth decay (no pops/clicks)
     envelope = np.exp(-3.5 * t / DURATION)
     audio = wave * envelope * 0.4
 
@@ -68,7 +70,7 @@ def build_sound(freq, wave_type):
 SOUND_BANK = {}
 def reload_all_sounds():
     global SOUND_BANK
-    print(f">> Caching all sounds for mode: {CURRENT_WAVE}...")
+    print(f">> Caching sounds for mode: {CURRENT_WAVE.upper()}...")
     SOUND_BANK = {k: (name, build_sound(freq, CURRENT_WAVE)) for k, (name, freq) in NOTES.items()}
 
 reload_all_sounds()
@@ -77,7 +79,7 @@ reload_all_sounds()
 active_keys = set()
 clock = pygame.time.Clock()
 
-print("\nReady! Play directly in the Resonix window.")
+print("\nReady! Focus the window and play with your keyboard.")
 
 # ----------------- MAIN LOOP -----------------
 while True:
@@ -91,7 +93,7 @@ while True:
             if event.key in SOUND_BANK:
                 active_keys.add(event.key)
                 name, sound = SOUND_BANK[event.key]
-                sound.play()  # Plays over any other note without cutting off!
+                sound.play()  # Instant sound, no cutting off other notes
 
             # Waveform Switchers [1, 2, 3, 4]
             elif event.key == pygame.K_1:
@@ -116,37 +118,55 @@ while True:
                 active_keys.remove(event.key)
 
     # ----------------- DRAW UI -----------------
-    screen.fill((15, 17, 23))  # Dark sleek background
+    screen.fill((16, 18, 24))  # Dark modern sleek background
 
     # Title & Mode
     title_text = title_font.render("RESONIX SYNTH", True, (0, 242, 254))
     mode_text = font.render(f"MODE [1-4]: {CURRENT_WAVE.upper()}", True, (255, 0, 127))
-    screen.blit(title_text, (30, 20))
-    screen.blit(mode_text, (WIDTH - 230, 28))
+    screen.blit(title_text, (40, 20))
+    screen.blit(mode_text, (WIDTH - 240, 28))
 
-    # Piano Keys Rendering
-    key_rects = [
-        (pygame.K_a, "A\nC4", 50),
-        (pygame.K_s, "S\nD4", 120),
-        (pygame.K_d, "D\nE4", 190),
-        (pygame.K_f, "F\nF4", 260),
-        (pygame.K_g, "G\nG4", 330),
-        (pygame.K_h, "H\nA4", 400),
-        (pygame.K_j, "J\nB4", 470),
-        (pygame.K_k, "K\nC5", 540),
+    # White Piano Keys
+    white_keys = [
+        (pygame.K_a, "A", 50),
+        (pygame.K_s, "S", 125),
+        (pygame.K_d, "D", 200),
+        (pygame.K_f, "F", 275),
+        (pygame.K_g, "G", 350),
+        (pygame.K_h, "H", 425),
+        (pygame.K_j, "J", 500),
+        (pygame.K_k, "K", 575),
     ]
 
-    # Draw White Keys
-    for k, label, x in key_rects:
-        color = (0, 242, 254) if k in active_keys else (230, 230, 235)
-        pygame.draw.rect(screen, color, (x, 100, 60, 160), border_radius=6)
+    for k, label, x in white_keys:
+        # Glow cyan if pressed
+        color = (0, 242, 254) if k in active_keys else (235, 235, 240)
+        pygame.draw.rect(screen, color, (x, 80, 65, 180), border_radius=6)
         
-        lbl = font.render(label.split('\n')[0], True, (20, 20, 20))
-        screen.blit(lbl, (x + 22, 225))
+        lbl = font.render(label, True, (20, 20, 20))
+        screen.blit(lbl, (x + 25, 225))
+
+    # Black Piano Keys
+    black_keys = [
+        (pygame.K_w, "W", 95),
+        (pygame.K_e, "E", 170),
+        (pygame.K_t, "T", 320),
+        (pygame.K_y, "Y", 395),
+        (pygame.K_u, "U", 470),
+    ]
+
+    for k, label, x in black_keys:
+        # Glow pink if pressed
+        color = (255, 0, 127) if k in active_keys else (35, 38, 48)
+        text_color = (255, 255, 255) if k in active_keys else (160, 160, 170)
+        pygame.draw.rect(screen, color, (x, 80, 42, 115), border_radius=4)
+        
+        lbl = font.render(label, True, text_color)
+        screen.blit(lbl, (x + 14, 155))
 
     # Instructions
-    info = font.render("Press [A-K] to play chords. Switch sounds with [1] [2] [3] [4].", True, (140, 145, 160))
-    screen.blit(info, (50, 290))
+    info = font.render("Play keys: [A-K] & sharps [W, E, T, Y, U] | Modes: [1] Sine [2] Saw [3] Square [4] Synth", True, (130, 135, 150))
+    screen.blit(info, (40, 305))
 
     pygame.display.flip()
-    clock.tick(60)  # Smooth 60 FPS
+    clock.tick(60)
