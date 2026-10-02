@@ -60,4 +60,3 @@ music = PlayMusic(player)
 
 for note in music.note_sequence:
     music.play_next_note()
-    keyboard.wait('space')  # Wait for the user to press the spacebar before playing the next note
