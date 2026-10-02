@@ -1,26 +1,26 @@
 import pygame
 import numpy as np
 import sys
+import threading
+import time
 
-# 1. Initialize Pygame Audio Mixer with ultra-low buffer (512 = ~11ms latency)
+# 1. Initialize Pygame Audio with low latency buffer
 pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
-pygame.mixer.set_num_channels(16)  # Allows multiple notes to play at once (chords!)
+pygame.mixer.set_num_channels(32)  # Plenty of channels for loops + live playing
 
-# Window setup
-WIDTH, HEIGHT = 700, 360
+WIDTH, HEIGHT = 720, 420
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Resonix — Polyphonic Hardware Synth")
+pygame.display.set_caption("Resonix — Polyphonic Synth & 8-Step Repeater")
 
-# Fonts (Fixed typo: SysFont)
-font = pygame.font.SysFont('Arial', 16, bold=True)
-title_font = pygame.font.SysFont('Arial', 26, bold=True)
+font = pygame.font.SysFont('Arial', 14, bold=True)
+title_font = pygame.font.SysFont('Arial', 24, bold=True)
+small_font = pygame.font.SysFont('Arial', 12)
 
-# Audio Settings
 SAMPLE_RATE = 44100
-DURATION = 0.5  # Seconds per note
+DURATION = 0.45
 
-# Note Frequencies
+# Notes mapping
 NOTES = {
     pygame.K_a: ("C4", 261.63),
     pygame.K_w: ("C#4", 277.18),
@@ -37,10 +37,9 @@ NOTES = {
     pygame.K_k: ("C5", 523.25)
 }
 
-CURRENT_WAVE = "synth"  # Default waveform
+CURRENT_WAVE = "synth"
 
 def build_sound(freq, wave_type):
-    """Generates 16-bit stereo PCM audio buffer for Pygame."""
     n_samples = int(SAMPLE_RATE * DURATION)
     t = np.linspace(0, DURATION, n_samples, False)
 
@@ -51,37 +50,76 @@ def build_sound(freq, wave_type):
     elif wave_type == "sawtooth":
         wave = 2 * (t * freq - np.floor(0.5 + t * freq))
     elif wave_type == "synth":
-        # Dual detuned oscillators for huge analog sound
         w1 = 2 * (t * freq - np.floor(0.5 + t * freq))
         w2 = 2 * (t * (freq * 1.006) - np.floor(0.5 + t * (freq * 1.006)))
         wave = (w1 + w2) * 0.5
 
-    # Envelope: Quick attack + smooth decay (no pops/clicks)
     envelope = np.exp(-3.5 * t / DURATION)
-    audio = wave * envelope * 0.4
-
-    # Convert to 16-bit signed stereo format that Pygame expects
+    audio = wave * envelope * 0.35
     audio_16bit = (audio * 32767).astype(np.int16)
-    stereo_audio = np.column_stack((audio_16bit, audio_16bit))
+    stereo = np.column_stack((audio_16bit, audio_16bit))
+    return pygame.sndarray.make_sound(stereo)
 
-    return pygame.sndarray.make_sound(stereo_audio)
-
-# Cache sounds in memory for instant playback
 SOUND_BANK = {}
 def reload_all_sounds():
     global SOUND_BANK
-    print(f">> Caching sounds for mode: {CURRENT_WAVE.upper()}...")
     SOUND_BANK = {k: (name, build_sound(freq, CURRENT_WAVE)) for k, (name, freq) in NOTES.items()}
 
 reload_all_sounds()
 
-# UI State
+# ----------------- REPEATER / SEQUENCER SYSTEM -----------------
+# Slots 5, 6, 7, 8, 9
+repeaters = {i: {"notes": [], "active": False} for i in range(5, 10)}
+recording_slot = None  # Which slot is currently recording 8 notes
+active_loop_slot = None # Which slot is currently playing
+
+def loop_player_thread():
+    """Background thread that continuously repeats the 8 recorded notes."""
+    while True:
+        if active_loop_slot and repeaters[active_loop_slot]["active"]:
+            seq = repeaters[active_loop_slot]["notes"]
+            if len(seq) == 8:
+                for note_key in seq:
+                    if not repeaters[active_loop_slot]["active"]:
+                        break
+                    # Play the sound in the loop
+                    if note_key in SOUND_BANK:
+                        SOUND_BANK[note_key][1].play()
+                    time.sleep(0.22)  # Tempo of repetition (BPM speed)
+        else:
+            time.sleep(0.05)
+
+# Start background sequencer thread
+threading.Thread(target=loop_player_thread, daemon=True).start()
+
+def toggle_repeater(slot_num):
+    global recording_slot, active_loop_slot
+
+    # If this slot is already playing -> STOP it
+    if repeaters[slot_num]["active"]:
+        repeaters[slot_num]["active"] = False
+        active_loop_slot = None
+        print(f">> Repeater [{slot_num}] STOPPED.")
+        return
+
+    # If it already has 8 notes saved -> START repeating it
+    if len(repeaters[slot_num]["notes"]) == 8:
+        # Stop any other slot
+        if active_loop_slot:
+            repeaters[active_loop_slot]["active"] = False
+        repeaters[slot_num]["active"] = True
+        active_loop_slot = slot_num
+        print(f">> Repeater [{slot_num}] LOOPING.")
+    else:
+        # Start recording 8 notes
+        recording_slot = slot_num
+        repeaters[slot_num]["notes"] = []
+        print(f">> Repeater [{slot_num}] RECORDING... Play 8 notes now!")
+
+# ----------------- MAIN UI & EVENT LOOP -----------------
 active_keys = set()
 clock = pygame.time.Clock()
 
-print("\nReady! Focus the window and play with your keyboard.")
-
-# ----------------- MAIN LOOP -----------------
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -89,13 +127,24 @@ while True:
             sys.exit()
 
         elif event.type == pygame.KEYDOWN:
-            # Note triggered
+            # 1. Play Note
             if event.key in SOUND_BANK:
                 active_keys.add(event.key)
-                name, sound = SOUND_BANK[event.key]
-                sound.play()  # Instant sound, no cutting off other notes
+                SOUND_BANK[event.key][1].play()
 
-            # Waveform Switchers [1, 2, 3, 4]
+                # If recording to a repeater slot
+                if recording_slot is not None:
+                    repeaters[recording_slot]["notes"].append(event.key)
+                    count = len(repeaters[recording_slot]["notes"])
+                    print(f"Recorded note {count}/8")
+                    if count == 8:
+                        # Finished recording 8 notes -> auto-start loop!
+                        repeaters[recording_slot]["active"] = True
+                        active_loop_slot = recording_slot
+                        recording_slot = None
+                        print(f">> 8 Notes captured! Auto-looping Repeater [{active_loop_slot}].")
+
+            # 2. Waveforms [1-4]
             elif event.key == pygame.K_1:
                 CURRENT_WAVE = "sine"
                 reload_all_sounds()
@@ -109,6 +158,11 @@ while True:
                 CURRENT_WAVE = "synth"
                 reload_all_sounds()
 
+            # 3. Repeaters [5-9]
+            elif event.key in [pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9]:
+                slot = int(event.unicode)
+                toggle_repeater(slot)
+
             elif event.key == pygame.K_ESCAPE:
                 pygame.quit()
                 sys.exit()
@@ -118,15 +172,37 @@ while True:
                 active_keys.remove(event.key)
 
     # ----------------- DRAW UI -----------------
-    screen.fill((16, 18, 24))  # Dark modern sleek background
+    screen.fill((16, 18, 24))
 
-    # Title & Mode
-    title_text = title_font.render("RESONIX SYNTH", True, (0, 242, 254))
-    mode_text = font.render(f"MODE [1-4]: {CURRENT_WAVE.upper()}", True, (255, 0, 127))
-    screen.blit(title_text, (40, 20))
-    screen.blit(mode_text, (WIDTH - 240, 28))
+    # Top Header
+    title = title_font.render("RESONIX SYNTH", True, (0, 242, 254))
+    mode = font.render(f"WAVE [1-4]: {CURRENT_WAVE.upper()}", True, (255, 0, 127))
+    screen.blit(title, (40, 18))
+    screen.blit(mode, (WIDTH - 240, 24))
 
-    # White Piano Keys
+    # Repeater Slot Status Badges [5, 6, 7, 8, 9]
+    rep_x = 40
+    for slot_idx in range(5, 10):
+        rep = repeaters[slot_idx]
+        if recording_slot == slot_idx:
+            status_text = f"REC ({len(rep['notes'])}/8)"
+            badge_color = (255, 165, 0) # Orange
+        elif rep["active"]:
+            status_text = "LOOPING"
+            badge_color = (0, 255, 128) # Green
+        elif len(rep["notes"]) == 8:
+            status_text = "READY"
+            badge_color = (100, 100, 150)
+        else:
+            status_text = "EMPTY"
+            badge_color = (40, 45, 60)
+
+        pygame.draw.rect(screen, badge_color, (rep_x, 65, 115, 36), border_radius=6)
+        lbl = font.render(f"[{slot_idx}] {status_text}", True, (255, 255, 255))
+        screen.blit(lbl, (rep_x + 10, 74))
+        rep_x += 128
+
+    # Draw Piano (White Keys)
     white_keys = [
         (pygame.K_a, "A", 50),
         (pygame.K_s, "S", 125),
@@ -139,14 +215,12 @@ while True:
     ]
 
     for k, label, x in white_keys:
-        # Glow cyan if pressed
         color = (0, 242, 254) if k in active_keys else (235, 235, 240)
-        pygame.draw.rect(screen, color, (x, 80, 65, 180), border_radius=6)
-        
+        pygame.draw.rect(screen, color, (x, 120, 65, 180), border_radius=6)
         lbl = font.render(label, True, (20, 20, 20))
-        screen.blit(lbl, (x + 25, 225))
+        screen.blit(lbl, (x + 25, 265))
 
-    # Black Piano Keys
+    # Draw Piano (Black Keys)
     black_keys = [
         (pygame.K_w, "W", 95),
         (pygame.K_e, "E", 170),
@@ -156,17 +230,21 @@ while True:
     ]
 
     for k, label, x in black_keys:
-        # Glow pink if pressed
         color = (255, 0, 127) if k in active_keys else (35, 38, 48)
         text_color = (255, 255, 255) if k in active_keys else (160, 160, 170)
-        pygame.draw.rect(screen, color, (x, 80, 42, 115), border_radius=4)
-        
+        pygame.draw.rect(screen, color, (x, 120, 42, 115), border_radius=4)
         lbl = font.render(label, True, text_color)
-        screen.blit(lbl, (x + 14, 155))
+        screen.blit(lbl, (x + 14, 195))
 
-    # Instructions
-    info = font.render("Play keys: [A-K] & sharps [W, E, T, Y, U] | Modes: [1] Sine [2] Saw [3] Square [4] Synth", True, (130, 135, 150))
-    screen.blit(info, (40, 305))
+    # Controls Instructions Footer
+    hints = [
+        "PLAY: [A-K] (White) & [W, E, T, Y, U] (Black)",
+        "SOUND: [1] Sine | [2] Saw | [3] Square | [4] Synth",
+        "REPEATERS: Press [5-9] once to record 8 notes -> auto loops! Press again to stop."
+    ]
+    for i, h in enumerate(hints):
+        info = small_font.render(h, True, (130, 135, 150))
+        screen.blit(info, (40, 325 + (i * 20)))
 
     pygame.display.flip()
     clock.tick(60)
