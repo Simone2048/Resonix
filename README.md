@@ -10,7 +10,7 @@ Resonix turns your phone's gyroscope or your computer mouse into an expressive m
 ## Demo
 
 <p align="center">
-  <a href="Screenshots/demo.mp4">
+  <a href="Screenshots/demo_1.mp4">
     <img src="Screenshots/1.png" alt="Watch Demo Video" width="80%" />
   </a>
   <br>
