@@ -239,4 +239,65 @@ while True:
 
         # Tab card
         pygame.draw.rect(screen, bg_color, (bx, 15, 118, 42), border_radius=6)
-        pygame.dr
+        pygame.draw.rect(screen, border_col, (bx, 15, 118, 42), 2 if is_selected else 1, border_radius=6)
+
+        tab_title = font.render(f"[{idx}] {t_data['name']}", True, t_data["color"] if is_selected else (190, 195, 205))
+        screen.blit(tab_title, (bx + 8, 20))
+
+        # Checkbox: RUN / MUTE
+        chk_box = pygame.Rect(bx + 88, 26, 18, 18)
+        pygame.draw.rect(screen, (20, 22, 30), chk_box, border_radius=3)
+        if t_data["enabled"]:
+            pygame.draw.rect(screen, (0, 255, 130), chk_box.inflate(-4, -4), border_radius=2)
+            chk_txt = small_font.render("ON", True, (0, 255, 130))
+        else:
+            chk_txt = small_font.render("MUTE", True, (120, 125, 140))
+        screen.blit(chk_txt, (bx + 8, 38))
+
+    # Spartito Sheet Grid Background
+    for row_idx, (note_name, _, is_sharp) in enumerate(PITCHES):
+        ry = CANVAS_Y + (row_idx * CELL_HEIGHT)
+
+        # Piano Key Label
+        key_color = (30, 33, 44) if is_sharp else (220, 225, 235)
+        text_color = (180, 185, 195) if is_sharp else (20, 20, 20)
+        pygame.draw.rect(screen, key_color, (15, ry, 60, CELL_HEIGHT - 2), border_radius=3)
+        lbl = small_font.render(note_name, True, text_color)
+        screen.blit(lbl, (25, ry + 6))
+
+        # Lane row
+        row_bg = (20, 23, 31) if row_idx % 2 == 0 else (16, 18, 26)
+        pygame.draw.rect(screen, row_bg, (CANVAS_X, ry, CANVAS_WIDTH, CELL_HEIGHT - 2))
+
+    # Vertical beat marker lines (ruler feel)
+    for beat_x in range(CANVAS_X, CANVAS_X + CANVAS_WIDTH, 110):
+        pygame.draw.line(screen, (30, 34, 46), (beat_x, CANVAS_Y), (beat_x, CANVAS_Y + NUM_ROWS * CELL_HEIGHT), 1)
+
+    # Draw Notes of the CURRENTLY SELECTED TIMBRE
+    active_color = TIMBRES[active_timbre_view]["color"]
+    for n in TRACK_NOTES[active_timbre_view]:
+        ny = CANVAS_Y + (n["row"] * CELL_HEIGHT)
+        # Note block
+        pygame.draw.rect(screen, active_color, (n["x"], ny, n["w"], CELL_HEIGHT - 2), border_radius=4)
+        # Drag handle edge
+        pygame.draw.rect(screen, (255, 255, 255), (n["x"] + n["w"] - 6, ny, 6, CELL_HEIGHT - 2), border_radius=2)
+        # Note label text
+        nlbl = small_font.render(n["name"], True, (10, 10, 10))
+        screen.blit(nlbl, (n["x"] + 6, ny + 5))
+
+    # Laser Playhead
+    pygame.draw.line(screen, (255, 255, 255), (playhead_x, CANVAS_Y), (playhead_x, CANVAS_Y + NUM_ROWS * CELL_HEIGHT), 2)
+    head_glow = pygame.Surface((12, NUM_ROWS * CELL_HEIGHT), pygame.SRCALPHA)
+    head_glow.fill((255, 255, 255, 30))
+    screen.blit(head_glow, (playhead_x - 6, CANVAS_Y))
+
+    # Controls Instructions
+    hints = [
+        "PAINT / RESIZE: Left-Click & Drag horizontally to stretch note length. Grab right edge to adjust length.",
+        "ERASE: Right-Click any note | TRACKS: Click tabs [1-6] to view their spartito | MUTE/RUN: Click the ON/MUTE checkbox."
+    ]
+    for i, h in enumerate(hints):
+        info = small_font.render(h, True, (130, 135, 150))
+        screen.blit(info, (20, 480 + (i * 18)))
+
+    pygame.display.flip()
