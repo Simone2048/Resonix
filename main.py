@@ -6,7 +6,7 @@ class AudioPlayer:
     def __init__(self, sample_rate=44100):
         self.sample_rate = sample_rate
 
-    def play_tone(self, frequency, duration=0.06):
+    def play_tone(self, frequency, duration=0.1):
         # 1. Create a timeline of points
         t = np.linspace(0, duration, int(self.sample_rate * duration), False)
         
