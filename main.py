@@ -3,7 +3,7 @@ import sounddevice as sd
 import keyboard
 
 class AudioPlayer:
-    def __init__(self, sample_rate=44100):
+    def __init__(self, sample_rate=22050):
         self.sample_rate = sample_rate
 
     def play_tone(self, frequency, duration=0.2):
