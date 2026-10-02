@@ -1,5 +1,6 @@
 import numpy as np
 import sounddevice as sd
+import keyboard
 
 class AudioPlayer:
     def __init__(self, sample_rate=44100):
@@ -39,3 +40,20 @@ class AudioPlayer:
             self.play_tone(frequency)
         else:
             print(f"Note {note} not recognized.")
+            
+class PlayMusic:
+    def __init__(self, audio_player):
+        self.audio_player = audio_player
+        self.note_sequence = ['C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4', 'C5']
+        self.current_index = 0
+
+    def play_next_note(self):
+        if self.current_index < len(self.note_sequence):
+            note = self.note_sequence[self.current_index]
+            self.audio_player.play_note(note)
+            self.current_index += 1
+        else:
+            print("Reached the end of the note sequence.")
+
+player = AudioPlayer()
+music = PlayMusic(player)
